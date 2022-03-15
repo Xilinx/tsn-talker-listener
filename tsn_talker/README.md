@@ -1,4 +1,5 @@
-#SPDX-License-Identifier: GPL-2.0
+#Copyright (c) 2016-2022 Xilinx, Inc. All rights reserved.
+#SPDX-License-Identifier: MIT
 The tsn_talker application is a traffic generator to generate sample TSN traffic. It allows you to pass
 L2 traffic parameters.
 Usage:

@@ -1,4 +1,5 @@
-# SPDX-License-Identifier: GPL-2.0
+#Copyright (c) 2016-2022 Xilinx, Inc. All rights reserved.
+#SPDX-License-Identifier: MIT
 AVBLIB_DIR = ../../lib/common
 AVBLIB_OBJS = avb_avtp.o avb_gptp.o
 AVBLIB_TARGETS = $(addprefix $(AVBLIB_DIR)/,$(AVBLIB_OBJS))
