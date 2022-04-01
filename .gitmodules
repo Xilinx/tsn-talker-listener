@@ -1,0 +1,3 @@
+[submodule "OpenAvnu"]
+	path = OpenAvnu
+	url = https://github.com/Avnu/OpenAvnu.git
