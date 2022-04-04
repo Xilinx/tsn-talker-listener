@@ -1,0 +1,31 @@
+From 6ac1fe9aedba42d0013c685b5323e4edcdffab22 Mon Sep 17 00:00:00 2001
+From: Christian Kohn <christian.kohn@xilinx.com>
+Date: Sun, 27 Mar 2022 05:38:39 +0200
+Subject: [PATCH] openavb_tasks: Add missing include file
+
+Add missing include file <bits/pthread_stack_min.h> when compiling for aarch64
+to avoid the below error:
+
+../../lib/avtp_pipeline/platform/Linux/openavb_tasks.h:39:8: error: missing binary operator before token "("
+   39 | #elif (PTHREAD_STACK_MIN > 65536)
+
+Signed-off-by: Christian Kohn <christian.kohn@xilinx.com>
+---
+ lib/avtp_pipeline/platform/Linux/openavb_tasks.h | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/lib/avtp_pipeline/platform/Linux/openavb_tasks.h b/lib/avtp_pipeline/platform/Linux/openavb_tasks.h
+index 387fd985..8263e497 100644
+--- a/lib/avtp_pipeline/platform/Linux/openavb_tasks.h
++++ b/lib/avtp_pipeline/platform/Linux/openavb_tasks.h
+@@ -33,6 +33,7 @@ https://github.com/benhoyt/inih/commit/74d2ca064fb293bc60a77b0bd068075b293cf175.
+ #define _EAVBTASKS_H
+ 
+ #include <limits.h>
++#include <bits/pthread_stack_min.h>
+ 
+ #if !defined(PTHREAD_STACK_MIN)
+ #error "PTHREAD_STACK_MIN variable not defined"
+-- 
+2.17.1
+
