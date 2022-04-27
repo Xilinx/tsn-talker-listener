@@ -1,6 +1,6 @@
 /***************************************************************
 * Copyright (c) 2016-2022 Xilinx, Inc. All rights reserved.
-* SPDX-License-Identifier: MIT
+* SPDX-License-Identifier: LGPL
 ***************************************************************/
 #include <stdlib.h>
 #include <stdio.h>
