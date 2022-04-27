@@ -9,6 +9,7 @@
 #include "../../lib/avtp_pipeline/rawsock/openavb_rawsock.h"
 #include <syscall.h>
 #include <sys/ioctl.h>
+#include "../common/tpmod_ctrl.h"
 
 static clockid_t get_clockid(int fd)
 {
@@ -28,7 +29,7 @@ static clockid_t get_clockid(int fd)
 #define RAWSOCK_TX_MODE_FILL (0)
 #define RAWSOCK_TX_MODE_SEQ  (1)
 
-static char interface[IFNAMSIZ] = { 'e', 't', 'h', '1', '\0'}; 
+static char interface[IFNAMSIZ] = { 'e', 't', 'h', '1', '\0'};
 //static int ethertype = 33024;
 static int ethertype = 0x86dd;
 //static int txlen = 64;
@@ -45,12 +46,19 @@ unsigned char src_mac[6] = {0x00, 0x0A, 0x35, 0x00, 0x02, 0x90 };
 unsigned char dest_mac[6] = {0x00, 0x0A, 0x35, 0x00, 0x02, 0x91 };
 #endif
 
+const static TriggerType TType = ETriggerPublisher;
+static TriggerMode TMode = ETriggerModeHW;
+static TriggerID TId = ETriggerID_1;
+static bool TriggerEnable = false;
+static bool TriggerOneShot = true;
+static TPmod_ctrl TriggerInstance;
+
 void dumpAscii(U8 *pFrame, U32 i, U32 *j)
 {
 	char c;
 
 	printf("  ");
-	
+
 	while (*j <= i) {
 		c = pFrame[*j];
 		*j += 1;
@@ -97,7 +105,7 @@ void dumpFrame(U8 *pFrame, U32 len, hdr_info_t *hdr)
 	printf("src: %s\n", ether_ntoa((const struct ether_addr*)hdr->shost));
 	printf("dst: %s\n", ether_ntoa((const struct ether_addr*)hdr->dhost));
 	if (hdr->vlan) {
-		printf("VLAN pcp=%u, vid=%u\n", (unsigned)hdr->vlan_pcp, hdr->vlan_vid); 
+		printf("VLAN pcp=%u, vid=%u\n", (unsigned)hdr->vlan_pcp, hdr->vlan_vid);
 	}
 	dumpFrameContent(pFrame, len);
 	printf("\n");
@@ -128,6 +136,7 @@ unsigned int seq_no = 0x0000;
 int send_packet(void *rs, U8 *pBuf, U8 *pData, int hdrlen,
 		U32 datalen )
 {
+	static int first_packet =1 ;
 	if (mode == RAWSOCK_TX_MODE_FILL) {
 		unsigned int i;
 
@@ -154,6 +163,13 @@ int send_packet(void *rs, U8 *pBuf, U8 *pData, int hdrlen,
 	}
 
 	openavbRawsockTxFrameReady(rs, pBuf, txlen,0);
+
+	if (TriggerEnable) {
+		TPmod_Trigger(&TriggerInstance, TType, TId);
+		printf("Triggered\n");
+		if (TriggerOneShot)
+			TriggerEnable=false;
+	}
 
 	return openavbRawsockSend(rs);
 
@@ -193,7 +209,7 @@ int send_n_packets_rtlmt(void *rs, U8 *pBuf, U8 *pData, int pkt_limit, int hdrle
 	sent++;
 
    }while((time_elapsed < duration) && (sent < pkt_limit) );
- 
+
    if(time_elapsed < duration)
    {
        rem.tv_sec = (duration - time_elapsed)/NANOSECONDS_PER_SECOND;
@@ -220,11 +236,12 @@ int main(int argc, char* argv[])
 	int pkt_limit = 0;
 	U64 duration = 0;
 	int ratelimit;
+	int Mode = 0;
 
-	if (argc != 11) {
+	if (argc != 11 && argc !=12) {
 		fprintf(stderr, "%s: Usage \"%s <iface> <dest_mac> <src_mac> \
 				<vlanid> <pcp> <txlen> <seq_offset> <pkt_cnt> \
-				<duration> <ratelimit>\n", argv[0], argv[0]);
+				<duration> <ratelimit> [pub_num]\n", argv[0], argv[0]);
 		fprintf(stderr, "where seq_offset is the offset after eth_hdr"
 				"where sequence 32 bit number is inserted\n");
 		fprintf(stderr, "where ratelimit is 0 or 1 \n");
@@ -237,6 +254,7 @@ int main(int argc, char* argv[])
 				"continuously\n");
 		fprintf(stderr, "if ratelimit is 1 <pkt_cnt> value -1 is "
 				"illegal\n");
+		fprintf(stderr, "pub_num = {1,2,3} . Default =0 (hardware mode)\n");
 		exit(1);
 	    }
 
@@ -263,6 +281,34 @@ int main(int argc, char* argv[])
 	if (ratelimit && (pkt_limit < 0)) {
 		printf("Invalid args\n");
 		exit(2);
+	}
+
+	if (argc ==12) {
+		Mode = atoi(argv[11]);
+		switch(Mode)
+		{
+		case 0:
+			TMode = ETriggerModeHW;
+			TriggerEnable = true;
+			break;
+		case 1:
+		case 2:
+		case 3:
+			TMode = ETriggerModeSW;
+			TriggerEnable = true;
+			TId = (TriggerID) Mode;
+			break;
+		default:
+			printf("Invalid trigger information");
+			TriggerEnable = false;
+		}
+	}
+
+	if (TriggerEnable) {
+		TPmod_Initialize(&TriggerInstance, TMode);
+		/* avoid unnecessary trigger when hw mode */
+		if (TMode == ETriggerModeHW)
+			TriggerEnable = false;
 	}
 
 	void* rs = openavbRawsockOpen(interface, FALSE, TRUE, ethertype, 0, MAX_NUM_FRAMES);
@@ -299,7 +345,7 @@ int main(int argc, char* argv[])
 	static U64 packetIntervalNSec = 0;
 	static U64 nextCycleNSec = 0;
 	static U64 nextReportInterval = 0;
- 
+
 	packetIntervalNSec = NANOSECONDS_PER_SECOND / txRate;
 	clock_gettime(CLOCK_MONOTONIC, &now);
 	nextCycleNSec = TIMESPEC_TO_NSEC(now);
