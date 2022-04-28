@@ -1,5 +1,5 @@
 #Copyright (c) 2016-2022 Xilinx, Inc. All rights reserved.
-#SPDX-License-Identifier: LGPL
+#SPDX-License-Identifier: LGPL-2.1
 AVBLIB_DIR = ../OpenAvnu/lib/common
 AVBLIB_OBJS = avb_avtp.o avb_gptp.o
 AVBLIB_TARGETS = $(addprefix $(AVBLIB_DIR)/,$(AVBLIB_OBJS))

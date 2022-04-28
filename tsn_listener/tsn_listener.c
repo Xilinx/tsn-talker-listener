@@ -1,6 +1,6 @@
 /***************************************************************
 * Copyright (c) 2016-2022 Xilinx, Inc. All rights reserved.
-* SPDX-License-Identifier: LGPL
+* SPDX-License-Identifier: LGPL-v2.1
 ***************************************************************/
 
 /* based on simple_talker openAVB */

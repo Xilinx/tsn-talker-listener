@@ -21,6 +21,6 @@ Notes
 
 Use the following tag instead of the full license text in the individual files:
 
-	SPDX-License-Identifier:    LGPL
+	SPDX-License-Identifier:    LGPL-2.1
 
 This enables machine processing of license information based on the SPDX License Identifiers that are here available: http://spdx.org/licenses/
