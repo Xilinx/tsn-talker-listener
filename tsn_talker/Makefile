@@ -4,6 +4,7 @@ AVBLIB_DIR = ../OpenAvnu/lib/common
 AVBLIB_OBJS = avb_avtp.o avb_gptp.o
 AVBLIB_TARGETS = $(addprefix $(AVBLIB_DIR)/,$(AVBLIB_OBJS))
 CC?=gcc
+INSTALL_PROGRAM ?= install
 OPT=-O2 -g
 CFLAGS=$(OPT) -Wall -Wextra -Wno-parentheses
 INCFLAGS= -I../OpenAvnu/daemons/mrpd -I../OpenAvnu/examples/common -I../OpenAvnu/daemons/common -I../OpenAvnu/lib/avtp_pipeline/include -I../OpenAvnu/lib/avtp_pipeline/platform/platTCAL/GNU \
@@ -11,6 +12,10 @@ INCFLAGS= -I../OpenAvnu/daemons/mrpd -I../OpenAvnu/examples/common -I../OpenAvnu
 	  -I ../OpenAvnu/lib/avtp_pipeline/rawsock/
 LDLIBS= -lrt -lm -pthread
 LDFLAGS=-L../OpenAvnu/lib/igb
+
+bindir ?= /usr/bin
+
+.PHONY: all install clean
 
 all: tsn_talker
 
@@ -49,6 +54,10 @@ tsn_talker.o: tsn_talker.c
 
 %: %.o
 	$(CC) $(LDFLAGS) $^ $(LDLIBS) -o $@
+
+install: all
+	$(INSTALL_PROGRAM) -d $(DESTDIR)$(bindir)
+	$(INSTALL_PROGRAM) -m 755 tsn_talker $(DESTDIR)$(bindir)
 
 clean:
 	$(RM) tsn_talker
