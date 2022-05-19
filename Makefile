@@ -6,6 +6,11 @@ all:
 	$(MAKE) -C tsn_listener
 	$(MAKE) -C tsn_talker
 
+.PHONY: install
+install:
+	$(MAKE) -C tsn_listener install
+	$(MAKE) -C tsn_talker install
+
 .PHONY: clean
 clean:
 	$(MAKE) -C tsn_listener clean
