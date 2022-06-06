@@ -8,24 +8,25 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <ctype.h>
+#include <argp.h>
+#include <string.h>
 #include "../../lib/avtp_pipeline/rawsock/openavb_rawsock.h"
 #include "../common/tpmod_ctrl.h"
-
-// Common usage with VTAG 0x8100:				./tsn_talker -i eth0 -t 33024 -d 1 -s 1
 
 #define MAX_NUM_FRAMES 10
 #define TIMESPEC_TO_NSEC(ts) (((uint64_t)ts.tv_sec * (uint64_t)NANOSECONDS_PER_SECOND) + (uint64_t)ts.tv_nsec)
 
+#define strformatbool(x) ((x)?"true":"false")
+
 static bool bRunning = TRUE;
 
 static char interface[5] = {'e','p','\0'};
-//static int ethertype = 33024;
-static int ethertype = 34525;
+static long int ethertype = 0x8100;
 static char* macaddr_s = NULL;
 static int dumpFlag = 0;
 static int reportSec = 1;
 
-const static TriggerType TType = ETriggerSubscriber;
+static const TriggerType TType = ETriggerSubscriber;
 static TriggerMode TMode = ETriggerModeHW;
 static TriggerID TId = ETriggerID_1;
 static bool TriggerEnable = false;
@@ -90,52 +91,135 @@ void dumpFrame(U8 *pFrame, U32 len, hdr_info_t *hdr)
 	printf("\n");
 }
 
+/*
+ * Argument Parsing
+ */
+
+/* Program documentation. */
+static char doc[] = "Listen tsn traffic";
+
+/* A description of the arguments we accept. None */
+static char args_doc[] = "";
+
+#define DESC_IFACE	"Interface name. e.g. eth0, eth1, eth2" \
+			"\nDefault: ep"
+#define DESC_ETYPE	"Ethertype. e.g 0x86dd, 0x8100" \
+			"\nDefault: 0x8100"
+#define DESC_VERBOSE	"Verbose/Dump the frame on recieve"
+#define DESC_TRIGGER	"Set Subscriber Trigger MODE from:" \
+			"\nhw	 : Hardware mode (trigger by hw)" \
+			"\nsw_1  : Software trigger on subscriber id 1" \
+			"\nsw_2  : Software trigger on subscriber id 2" \
+			"\nsw_3  : Software trigger on subscriber id 3" \
+			"\nn	 : Do not configure trigger (default)"
+#define DESC_ONESHOT	"y : Trigger only for first frame" \
+			"\nn : Trigger for all the frames (Default)" \
+			"\nApplicable only for sw trigger"
+
+/* The options we understand. */
+static struct argp_option options[] = {
+	{ 0, 0, 0, 0, "Ethernet config:" },
+	{ "iface", 'i', "ETH_I/F", 0, DESC_IFACE },
+	{ "etype", 'e', "ETH_TYPE", 0, DESC_ETYPE },
+	{ 0, 0, 0, 0, "Oscilloscope trigger setup:" },
+	{ "trigger", 'T', "MODE", 0, DESC_TRIGGER },
+	{ "trigger-oneshot", 'O', "y/n", 0, DESC_ONESHOT },
+	{ 0, 0, 0, 0, "Misc:" },
+	{ "verbose", 'v', 0, 0, DESC_VERBOSE },
+	{ 0 }
+};
+
+/* Parse a single option. */
+static error_t parse_opt(int key, char *arg, struct argp_state *state)
+{
+	error_t status = 0;
+	switch (key) {
+	case 'i':
+		strcpy(interface, arg);
+		// TODO: error check for valid interace name
+		break;
+	case 'e':
+		ethertype = strtol(arg, NULL, 0);
+		if (ethertype == 0){
+			printf("Invalid ether type: %s\n",arg);
+			status = ARGP_ERR_UNKNOWN;
+		}
+		break;
+	case 'T':
+		TriggerEnable = true;
+		if (strcmp(arg, "hw") == 0) {
+			TMode = ETriggerModeHW;
+		} else if (strcmp(arg, "sw_1") == 0) {
+			TMode = ETriggerModeSW;
+			TId = 1;
+		} else if (strcmp(arg, "sw_2") == 0) {
+			TMode = ETriggerModeSW;
+			TId = 2;
+		} else if (strcmp(arg, "sw_3") == 0) {
+			TMode = ETriggerModeSW;
+			TId = 3;
+		} else if (strcmp(arg, "n") == 0) {
+			TriggerEnable = false;
+		} else {
+			printf("Invalid Trigger Mode: %s\n", arg);
+			TriggerEnable = false;
+			status = ARGP_ERR_UNKNOWN;
+		}
+		break;
+	case 'O':
+		if ((strcmp(arg, "y") == 0) || (strcmp(arg, "Y") == 0)) {
+		    TriggerOneShot = true;
+		} else if ((strcmp(arg, "n") == 0) || (strcmp(arg, "N") == 0)) {
+		    TriggerOneShot = false;
+		} else {
+		    TriggerOneShot = false;
+		    status = ARGP_ERR_UNKNOWN;
+		}
+		break;
+
+	case 'v':
+		dumpFlag = 1;
+		break;
+
+	default:
+		status = ARGP_ERR_UNKNOWN;
+		break;
+	}
+
+	return status;
+}
+
+/* argp parser. */
+static struct argp argp = { options, parse_opt, args_doc, doc };
+
 int main(int argc, char* argv[])
 {
 	//U8 *macaddr;
 	struct ether_addr *macaddr;
-	int Mode=0;
+	bool show_args = true; /* list the arguments used */
 
-	switch(argc)
-	{
-	case 5:
-		Mode = atoi(argv[4]);
-		switch(Mode)
-		{
-		case 0:
-			TMode = ETriggerModeHW;
-			TriggerEnable = true;
-			break;
-		case 1:
-		case 2:
-		case 3:
-			TMode = ETriggerModeSW;
-			TriggerEnable = true;
-			TId = (TriggerID) Mode;
-			break;
-		default:
-			printf("Invalid trigger information");
-			TriggerEnable = false;
+	argp_parse(&argp, argc, argv, 0, 0, 0);
+
+	/* dump the arguments being used for the program */
+	if (show_args) {
+		printf("Using following arguments:\n");
+		printf("Interface: %s\n", interface);
+		printf("Ethertype: 0x%lX\n", ethertype);
+		printf("dumpFlag: %s\n", strformatbool(dumpFlag));
+		printf("Trigger Enabled: %s\n", strformatbool(TriggerEnable));
+		if (TriggerEnable) {
+		    printf("Trigger Type: Subscriber\n");
+		    if (TMode == ETriggerModeSW) {
+			    printf("Trigger Mode: SW\n");
+			    printf("Trigger Id: %d\n", TId);
+			    printf("Trigger Oneshot: %s\n",
+					    strformatbool(TriggerOneShot));
+		    }
+		    else {
+			    printf("Trigger Mode: HW\n");
+		    }
 		}
-	case 4:
-		dumpFlag = atoi(argv[3]);
-	case 3:
-		ethertype = atoi(argv[2]);
-	case 2:
-		strncpy(interface, argv[1], 5);
-	case 1:
-		break;
-	default:
-		printf("Usage: %s [<interface> [<ethertype> [<dump_mode> [<sub_num>]]]]", argv[0]);
 	}
-
-	if (interface == NULL || ethertype == -1) {
-		printf("error: must specify network interface and ethertype\n");
-		exit(2);
-	}
-
-	printf("%s : \nInterface: %s\nEthertype: 0x%X\nDump Mode: %d\n", argv[0],
-			interface, ethertype, dumpFlag);
 
 	if (TriggerEnable) {
 		TPmod_Initialize(&TriggerInstance, TMode);
