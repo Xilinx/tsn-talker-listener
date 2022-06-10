@@ -3,6 +3,11 @@
 AVBLIB_DIR = ../OpenAvnu/lib/common
 AVBLIB_OBJS = avb_avtp.o avb_gptp.o
 AVBLIB_TARGETS = $(addprefix $(AVBLIB_DIR)/,$(AVBLIB_OBJS))
+
+COMMON_DIR = ../common/
+COMMON_SRC := $(wildcard $(COMMON_DIR)/*.c)
+COMMON_OBJ := $(patsubst $(COMMON_DIR)/%.c, $(COMMON_DIR)/%.o, $(COMMON_SRC))
+
 CC ?= gcc
 INSTALL_PROGRAM ?= install
 OPT = -O2 -g
@@ -20,10 +25,13 @@ bindir ?= /usr/bin
 all: tsn_listener
 
 tsn_listener: $(AVBLIB_TARGETS) openavb_time_osal.o sendmmsg_rawsock.o openavb_rawsock.o tsn_listener.o simple_rawsock.o rawsock_impl.o ring_rawsock.o \
-	openavb_log.o openavb_queue.o
+	openavb_log.o openavb_queue.o $(COMMON_OBJ)
 
 $(AVBLIB_OBJS): $(AVBLIB_DIR)/%.h $(AVBLIB_DIR)/%.c
 	make -C $(AVBLIB_DIR) $@
+
+$(COMMON_DIR)/%.o: $(COMMON_DIR)/%.c
+	$(CC) -I$(COMMON_DIR) -c $< -o $@
 
 openavb_time_osal.o: ../OpenAvnu/lib/avtp_pipeline/platform/Linux/openavb_time_osal.c
 	$(CC) $(CFLAGS) $(INCFLAGS) -I../OpenAvnu/lib/igb -I ../OpenAvnu/lib/common -c ../OpenAvnu/lib/avtp_pipeline/platform/Linux/openavb_time_osal.c
@@ -61,4 +69,5 @@ install: all
 
 clean:
 	$(RM) tsn_listener
+	$(RM) $(COMMON_OBJ)
 	$(RM) `find . -name "*~" -o -name "*.[oa]" -o -name "\#*\#" -o -name TAGS -o -name core -o -name "*.orig"`
