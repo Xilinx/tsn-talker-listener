@@ -115,6 +115,7 @@ static char args_doc[] = "";
 #define DESC_ONESHOT	"y : Trigger only for first frame" \
 			"\nn : Trigger for all the frames (Default)" \
 			"\nApplicable only for sw trigger"
+#define DESC_FALLBK	"Allow Fallback for trigger setup"
 
 /* The options we understand. */
 static struct argp_option options[] = {
@@ -124,6 +125,7 @@ static struct argp_option options[] = {
 	{ 0, 0, 0, 0, "Oscilloscope trigger setup:" },
 	{ "trigger", 'T', "MODE", 0, DESC_TRIGGER },
 	{ "trigger-oneshot", 'O', "y/n", 0, DESC_ONESHOT },
+	{ "fallback", 777, 0, OPTION_HIDDEN, DESC_FALLBK },
 	{ 0, 0, 0, 0, "Misc:" },
 	{ "verbose", 'v', 0, 0, DESC_VERBOSE },
 	{ 0 }
@@ -176,7 +178,9 @@ static error_t parse_opt(int key, char *arg, struct argp_state *state)
 		    status = ARGP_ERR_UNKNOWN;
 		}
 		break;
-
+	case 777:
+		gFallbackEnabled = true;
+		break;
 	case 'v':
 		dumpFlag = 1;
 		break;
@@ -218,11 +222,16 @@ int main(int argc, char* argv[])
 		    else {
 			    printf("Trigger Mode: HW\n");
 		    }
+		    if (gFallbackEnabled)
+			printf("Test pmod Fallback Allowed\n");
 		}
 	}
 
 	if (TriggerEnable) {
-		TPmod_Initialize(&TriggerInstance, TMode);
+		if (TPmod_Initialize(&TriggerInstance, TMode) != 0) {
+			printf("Test PMOD controller failed to initialized. Disabling all external triggers\n");
+			TriggerEnable = false;
+		}
 		/* avoid unnecessary trigger when hw mode */
 		if (TMode == ETriggerModeHW)
 			TriggerEnable = false;

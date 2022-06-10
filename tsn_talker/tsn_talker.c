@@ -267,6 +267,7 @@ int send_n_packets_rtlmt(void *rs, U8 *pBuf, U8 *pData, int pkt_limit, int hdrle
 #define DESC_ONESHOT	"y : Trigger only for first frame (Default)" \
 			"\nn : Trigger for all the frames" \
 			"\nApplicable only for sw trigger"
+#define DESC_FALLBK	"Allow Fallback for trigger setup"
 
 /* Program documentation. */
 static char doc[] = "Generate tsn traffic on the specified interface\v" DESC_COMBO;
@@ -291,7 +292,7 @@ static struct argp_option options[] = {
 	{ 0, 0, 0, 0, "Oscilloscope trigger setup:" },
 	{ "trigger", 'T', "MODE", 0, DESC_TRIGGER },
 	{ "trigger-oneshot", 'O', "y/n", 0, DESC_ONESHOT },
-
+	{ "fallback", 777, 0, OPTION_HIDDEN, DESC_FALLBK },
 	{ 0, 0, 0, 0, "Misc:" },
 	{ 0 }
 };
@@ -393,6 +394,9 @@ static error_t parse_opt(int key, char *arg, struct argp_state *state)
 		    status = ARGP_ERR_UNKNOWN;
 		}
 		break;
+	case 777:
+		gFallbackEnabled = true;
+		break;
 	default:
 		status = ARGP_ERR_UNKNOWN;
 		break;
@@ -476,11 +480,16 @@ int main(int argc, char* argv[])
 		    else {
 			    printf("Trigger Mode: HW\n");
 		    }
+		    if (gFallbackEnabled)
+			printf("Test pmod Fallback Allowed\n");
 		}
 	}
 
 	if (TriggerEnable) {
-		TPmod_Initialize(&TriggerInstance, TMode);
+		if (TPmod_Initialize(&TriggerInstance, TMode) != 0) {
+			printf("Test PMOD controller failed to initialized. Disabling all external triggers\n");
+			TriggerEnable = false;
+		}
 		/* avoid unnecessary trigger when hw mode */
 		if (TMode == ETriggerModeHW)
 			TriggerEnable = false;
