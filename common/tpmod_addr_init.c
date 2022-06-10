@@ -27,6 +27,8 @@
 #define MAX_UIO_PATH_SIZE       256
 #define MAX_UIO_NAME_SIZE       64
 
+bool gFallbackEnabled = false;
+
 static int line_from_file(char* filename, char* linebuf) {
 	char* s;
 	int i;
@@ -150,6 +152,12 @@ static int fallback_init(TPmod_ctrl *InstancePtr)
 		perror("Failed to map memory");
 		return ERR_GENERIC_FAILURE;
 	}
+
+	printf("Using fallback address fetch with Physical Address: 0x%lx\n",
+						InstancePtr->PhysicalMap.BaseAddr);
+
+	printf("TPMod Cntrl Virt Addr: 0x%lx\n", InstancePtr->BaseAddr);
+
 	return 0;
 }
 
@@ -157,7 +165,7 @@ int TPmod_InitializeAddress(TPmod_ctrl *InstancePtr)
 {
 	int status = uio_init(InstancePtr);
 
-	if (status == ERR_DEVICE_NOT_FOUND) {
+	if (gFallbackEnabled && status == ERR_DEVICE_NOT_FOUND) {
 		return fallback_init(InstancePtr);
 	}
 

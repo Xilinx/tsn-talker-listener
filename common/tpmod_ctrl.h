@@ -49,6 +49,8 @@ typedef struct {
 	bool isFallback;	//TODO: might not be needed.
 } TPmod_ctrl;
 
+extern bool gFallbackEnabled;
+
 int TPmod_Initialize(TPmod_ctrl *, TriggerMode);
 int TPmod_SetMode(TPmod_ctrl *, TriggerMode);
 int TPmod_Trigger(TPmod_ctrl *, TriggerType, TriggerID);
