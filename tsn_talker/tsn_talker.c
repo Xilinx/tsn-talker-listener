@@ -6,9 +6,12 @@
 #include <stdio.h>
 #include <ctype.h>
 #include <string.h>
+#include <stdbool.h>
+#include <argp.h>
 #include "../../lib/avtp_pipeline/rawsock/openavb_rawsock.h"
 #include <syscall.h>
 #include <sys/ioctl.h>
+#include "../common/tpmod_ctrl.h"
 
 static clockid_t get_clockid(int fd)
 {
@@ -19,7 +22,18 @@ static clockid_t get_clockid(int fd)
 }
 
 
-//Common usage: ./tsn_listener -i eth0 -t 8944 -r 8000 -s 1 -c 1 -m 1 -l 100
+#define strformatbool(x) ((x)?"true":"false")
+
+/* Default network parameter values */
+#define DEF_VLAN	(10)
+#define DEF_PCP		(4)
+#define DEF_PKT_LIM	(0)
+#define DEF_RATE_LIM	(0)
+#define DEF_DURATION	(0)
+#define DEF_ETH_TYPE	(0x8100)
+#define DEF_LEN		(900)
+#define DEF_SEQ_OFF	(0)
+#define DEF_PKT_CNT	(1)
 
 #define MAX_NUM_FRAMES 100
 #define NANOSECONDS_PER_SECOND		(1000000000ULL)
@@ -28,29 +42,29 @@ static clockid_t get_clockid(int fd)
 #define RAWSOCK_TX_MODE_FILL (0)
 #define RAWSOCK_TX_MODE_SEQ  (1)
 
-static char interface[IFNAMSIZ] = { 'e', 't', 'h', '1', '\0'}; 
-//static int ethertype = 33024;
-static int ethertype = 0x86dd;
-//static int txlen = 64;
-static U32 txlen = 1500;
+static char interface[5] = {'e','p','\0'};
+static long int ethertype = DEF_ETH_TYPE;
+static U32 txlen = DEF_LEN;
 static int mode = RAWSOCK_TX_MODE_FILL;
-static unsigned int seq_off = 0;
+static unsigned int seq_off = DEF_SEQ_OFF;
 static clockid_t clkid;
 
-unsigned char src_mac[6]  = { 0x00, 0x0A, 0x35, 0x00, 0x01, 0x0e };
-unsigned char dest_mac[6] = { 0xa0, 0x36, 0x9f, 0x68, 0x4c, 0x96 };
+static unsigned char src_mac[6]  = { 0xA0, 0xA0, 0xA0, 0xA0, 0xA0, 0xA0 };
+static unsigned char dest_mac[6] = { 0xE0, 0xE0, 0xE0, 0xE0, 0xE0, 0xE0 };
 
-#if 0
-unsigned char src_mac[6] = {0x00, 0x0A, 0x35, 0x00, 0x02, 0x90 };
-unsigned char dest_mac[6] = {0x00, 0x0A, 0x35, 0x00, 0x02, 0x91 };
-#endif
+const static TriggerType TType = ETriggerPublisher;
+static TriggerMode TMode = ETriggerModeHW;
+static TriggerID TId = ETriggerID_1;
+static bool TriggerEnable = false;
+static bool TriggerOneShot = true;
+static TPmod_ctrl TriggerInstance;
 
 void dumpAscii(U8 *pFrame, U32 i, U32 *j)
 {
 	char c;
 
 	printf("  ");
-	
+
 	while (*j <= i) {
 		c = pFrame[*j];
 		*j += 1;
@@ -97,7 +111,7 @@ void dumpFrame(U8 *pFrame, U32 len, hdr_info_t *hdr)
 	printf("src: %s\n", ether_ntoa((const struct ether_addr*)hdr->shost));
 	printf("dst: %s\n", ether_ntoa((const struct ether_addr*)hdr->dhost));
 	if (hdr->vlan) {
-		printf("VLAN pcp=%u, vid=%u\n", (unsigned)hdr->vlan_pcp, hdr->vlan_vid); 
+		printf("VLAN pcp=%u, vid=%u\n", (unsigned)hdr->vlan_pcp, hdr->vlan_vid);
 	}
 	dumpFrameContent(pFrame, len);
 	printf("\n");
@@ -155,6 +169,13 @@ int send_packet(void *rs, U8 *pBuf, U8 *pData, int hdrlen,
 
 	openavbRawsockTxFrameReady(rs, pBuf, txlen,0);
 
+	if (TriggerEnable) {
+		TPmod_Trigger(&TriggerInstance, TType, TId);
+		printf("Triggered\n");
+		if (TriggerOneShot)
+			TriggerEnable=false;
+	}
+
 	return openavbRawsockSend(rs);
 
 }
@@ -193,7 +214,7 @@ int send_n_packets_rtlmt(void *rs, U8 *pBuf, U8 *pData, int pkt_limit, int hdrle
 	sent++;
 
    }while((time_elapsed < duration) && (sent < pkt_limit) );
- 
+
    if(time_elapsed < duration)
    {
        rem.tv_sec = (duration - time_elapsed)/NANOSECONDS_PER_SECOND;
@@ -209,60 +230,269 @@ int send_n_packets_rtlmt(void *rs, U8 *pBuf, U8 *pData, int pkt_limit, int hdrle
     return sent;
 }
 
+/*
+ * Argument Parsing
+ */
+
+
+#define DESC_IFACE	"Interface name. e.g. eth0, eth1, eth2" \
+			"\nDefault: ep"
+#define DESC_ETYPE	"Ethertype. e.g 0x86dd, 0x8100" \
+			"\nDefault: 0x8100"
+#define DESC_VERBOSE	"Verbose/Dump the frame on recieve"
+#define DESC_DMAC	"Destination MAC Address" \
+			"\nDefault: e0:e0:e0:e0:e0:e0"
+#define DESC_SMAC	"Source MAC Address" \
+			"\nDefault: a0:a0:a0:a0:a0:a0"
+#define DESC_VLAN	"VLAN ID. Default: 10"
+#define DESC_PCP	"Priority Code Point value. Default: 4"
+#define DESC_PKT_LEN	"Data length for each packet in bytes.\nDefault: 900"
+#define DESC_SEQ_OFF	"Sequence offset. Default: 0"
+#define DESC_PKT_CNT	"Number of packets to be transmitted" \
+			"\nDefault: 1"
+#define DESC_DUR	"Duration. Default: 0"
+#define DESC_RATE_LIM	"Rate Limit. Default : 0"
+#define DESC_COMBO	"Following table explain the effect of options in combination:" \
+			"\nRATE_LIMIT   PKT_CNT  Meaning" \
+			"\n 0            N (>0)  N packets are sent and stoped." \
+			"\n 0            -1      Unlimited packets are sent." \
+			"\n 1            N (>0)  N packets are sent in DURATION repeatedly" \
+			"\n 1            -1      Illegal\n"
+#define DESC_TRIGGER	"Set Subscriber Trigger MODE from:" \
+			"\nhw	 : Hardware mode (trigger by hw)" \
+			"\nsw_1  : Software trigger on subscriber id 1" \
+			"\nsw_2  : Software trigger on subscriber id 2" \
+			"\nsw_3  : Software trigger on subscriber id 3" \
+			"\nn	 : Do not configure trigger (default)"
+#define DESC_ONESHOT	"y : Trigger only for first frame (Default)" \
+			"\nn : Trigger for all the frames" \
+			"\nApplicable only for sw trigger"
+#define DESC_FALLBK	"Allow Fallback for trigger setup"
+
+/* Program documentation. */
+static char doc[] = "Generate tsn traffic on the specified interface\v" DESC_COMBO;
+
+/* A description of the arguments we accept. None */
+static char args_doc[] = "";
+
+static struct argp_option options[] = {
+	{ 0, 0, 0, 0, "Ethernet config:" },
+	{ "iface", 'i', "ETH_I/F", 0, DESC_IFACE },
+	{ "etype", 'e', "ETH_TYPE", 0, DESC_ETYPE },
+	{ "dmac",  'd', "DST_MAC", 0, DESC_DMAC },
+	{ "smac",  's', "SRC_MAC", 0, DESC_SMAC },
+	{ "vlan",  'v', "VLAN_ID", 0, DESC_VLAN },
+	{ "pcp",  'p', "PCP_VAL", 0, DESC_PCP },
+	{ "len",  'l', "PKT_LEN", 0, DESC_PKT_LEN },
+	{ "seq_off",  'o', "SEQ_OFF", 0, DESC_SEQ_OFF },
+	{ "count",  'n', "PKT_CNT", 0, DESC_PKT_CNT },
+	{ "duration",  't', "DURATION", 0, DESC_DUR },
+	{ "ratelimit",  'r', "RATE_LIMIT", 0, DESC_RATE_LIM },
+
+	{ 0, 0, 0, 0, "Oscilloscope trigger setup:" },
+	{ "trigger", 'T', "MODE", 0, DESC_TRIGGER },
+	{ "trigger-oneshot", 'O', "y/n", 0, DESC_ONESHOT },
+	{ "fallback", 777, 0, OPTION_HIDDEN, DESC_FALLBK },
+	{ 0, 0, 0, 0, "Misc:" },
+	{ 0 }
+};
+
+struct talker_arguments {
+	int vlanid;
+	int pcp;
+	int pkt_limit;
+	uint64_t duration;
+	int ratelimit;
+};
+
+/* Parse a single option. */
+static error_t parse_opt(int key, char *arg, struct argp_state *state)
+{
+	error_t status = 0;
+	struct talker_arguments *arguments = state->input;
+
+	switch (key) {
+	case 'i':
+		strcpy(interface, arg);
+		// TODO: validate interace name
+		break;
+	case 'e':
+		ethertype = strtol(arg, NULL, 0);
+		if (ethertype == 0){
+			printf("Invalid ether type: %s\n",arg);
+			status = ARGP_ERR_UNKNOWN;
+		}
+		break;
+	case 'd':
+		sscanf(arg, "%hhx:%hhx:%hhx:%hhx:%hhx:%hhx",
+				&dest_mac[0], &dest_mac[1], &dest_mac[2],
+				&dest_mac[3], &dest_mac[4], &dest_mac[5]);
+		//TODO: validate mac address
+		break;
+	case 's':
+		sscanf(arg, "%hhx:%hhx:%hhx:%hhx:%hhx:%hhx",
+				&src_mac[0], &src_mac[1], &src_mac[2],
+				&src_mac[3], &src_mac[4], &src_mac[5]);
+		//TODO: validate mac address
+		break;
+	case 'v':
+		arguments->vlanid = atoi(arg);
+		//TODO: validate input
+		break;
+	case 'p':
+		arguments->pcp = atoi(arg);
+		//TODO: validate input
+		break;
+	case 'l':
+		txlen = atoi(arg);
+		//TODO: validate input
+		break;
+	case 'o':
+		seq_off = atoi(arg);
+		//TODO: validate input
+		break;
+	case 'n':
+		arguments->pkt_limit = atoi(arg);
+		//TODO: validate input
+		break;
+	case 't':
+		arguments->duration = atoi(arg);
+		//TODO: validate input
+		break;
+	case 'r':
+		arguments->ratelimit = atoi(arg);
+		//TODO: validate input
+		break;
+	case 'T':
+		TriggerEnable = true;
+		if (strcmp(arg, "hw") == 0) {
+			TMode = ETriggerModeHW;
+		} else if (strcmp(arg, "sw_1") == 0) {
+			TMode = ETriggerModeSW;
+			TId = 1;
+		} else if (strcmp(arg, "sw_2") == 0) {
+			TMode = ETriggerModeSW;
+			TId = 2;
+		} else if (strcmp(arg, "sw_3") == 0) {
+			TMode = ETriggerModeSW;
+			TId = 3;
+		} else if (strcmp(arg, "n") == 0) {
+			TriggerEnable = false;
+		} else {
+			printf("Invalid Trigger Mode: %s\n", arg);
+			TriggerEnable = false;
+			status = ARGP_ERR_UNKNOWN;
+		}
+		break;
+	case 'O':
+		if ((strcmp(arg, "y") == 0) || (strcmp(arg, "Y") == 0)) {
+		    TriggerOneShot = true;
+		} else if ((strcmp(arg, "n") == 0) || (strcmp(arg, "N") == 0)) {
+		    TriggerOneShot = false;
+		} else {
+		    TriggerOneShot = false;
+		    status = ARGP_ERR_UNKNOWN;
+		}
+		break;
+	case 777:
+		gFallbackEnabled = true;
+		break;
+	default:
+		status = ARGP_ERR_UNKNOWN;
+		break;
+	}
+
+	return status;
+}
+
+/* argp parser. */
+static struct argp argp = { options, parse_opt, args_doc, doc };
 
 int main(int argc, char* argv[])
 {
 	struct timespec tmx;
 	struct timespec now;
 
-	int vlanid = 2;
-	int pcp = 4;
-	int pkt_limit = 0;
-	U64 duration = 0;
+	struct talker_arguments arguments;
+
+	bool show_args = true; /* list the arguments used */
+
+	int vlanid;
+	int pcp;
+	int pkt_limit;
+	uint64_t duration;
 	int ratelimit;
 
-	if (argc != 11) {
-		fprintf(stderr, "%s: Usage \"%s <iface> <dest_mac> <src_mac> \
-				<vlanid> <pcp> <txlen> <seq_offset> <pkt_cnt> \
-				<duration> <ratelimit>\n", argv[0], argv[0]);
-		fprintf(stderr, "where seq_offset is the offset after eth_hdr"
-				"where sequence 32 bit number is inserted\n");
-		fprintf(stderr, "where ratelimit is 0 or 1 \n");
-		fprintf(stderr, "if ratelimit is 0, <pkt_cnt> number of packets "
-				"are sent full speed and stop\n");
-		fprintf(stderr, "if ratelimit is 0, and <pkt_cnt> is -1; packets "
-				"are sent full speed continuously\n");
-		fprintf(stderr, "if ratelimit is 1 <pkt_cnt> number of packets "
-				"are sent in <duration>; and this cycle repeats "
-				"continuously\n");
-		fprintf(stderr, "if ratelimit is 1 <pkt_cnt> value -1 is "
-				"illegal\n");
-		exit(1);
-	    }
+	/*
+	 * Set local argument defaults
+	 */
+	arguments.vlanid = DEF_VLAN;
+	arguments.pcp = DEF_PCP;
+	arguments.pkt_limit = DEF_PKT_LIM;
+	arguments.duration = DEF_DURATION;
+	arguments.ratelimit = DEF_RATE_LIM;
 
-	strncpy(interface, argv[1], IFNAMSIZ);
+	/* Parse use arguments */
+	argp_parse(&argp, argc, argv, 0, 0, &arguments);
 
-	if (interface == NULL || ethertype < 0) {
-		printf("error: must specify network interface and ethertype\n");
+	/*
+	 * Override the arguments with user supplied.
+	 */
+	vlanid = arguments.vlanid;
+	pcp = arguments.pcp;
+	pkt_limit = arguments.pkt_limit;
+	duration = arguments.duration;
+	ratelimit = arguments.ratelimit;
+
+	if (ratelimit && (pkt_limit < 0)) {
+		printf("Invalid args for pkt count and rate limit. See table in --help option\n");
 		exit(2);
 	}
 
+	/* dump the arguments being used for the program */
+	if (show_args) {
+		printf("Using following arguments:\n");
+		printf("Interface: %s\n", interface);
+		printf("Ethertype: 0x%lX\n", ethertype);
+		printf("Dest Mac: %2X:%2X:%2X:%2X:%2X:%2X\n",
+					dest_mac[0], dest_mac[1], dest_mac[2],
+					dest_mac[3], dest_mac[4], dest_mac[5]);
+		printf("Src Mac: %2X:%2X:%2X:%2X:%2X:%02X\n",
+					src_mac[0], src_mac[1], src_mac[2],
+					src_mac[3], src_mac[4], src_mac[5]);
+		printf("VLAN: %d\n", vlanid);
+		printf("PCP: %d\n", pcp);
+		printf("txlen: %d\n", txlen);
+		printf("seq off: %d\n", seq_off);
+		printf("pkt_limit: %d\n", pkt_limit);
+		printf("duration: %ld\n", duration);
+		printf("ratelimit: %d\n", ratelimit);
 
-	sscanf(argv[2], "%hhx:%hhx:%hhx:%hhx:%hhx:%hhx", &dest_mac[0], &dest_mac[1], &dest_mac[2], &dest_mac[3], &dest_mac[4], &dest_mac[5]);
+		printf("Trigger Enabled: %s\n", strformatbool(TriggerEnable));
+		if (TriggerEnable) {
+		    printf("Trigger Type: Publisher\n");
+		    if (TMode == ETriggerModeSW) {
+			    printf("Trigger Mode: SW\n");
+			    printf("Trigger Id: %d\n", TId);
+			    printf("Trigger Oneshot: %s\n",
+					    strformatbool(TriggerOneShot));
+		    }
+		    else {
+			    printf("Trigger Mode: HW\n");
+		    }
+		    if (gFallbackEnabled)
+			printf("Test pmod Fallback Allowed\n");
+		}
+	}
 
-	sscanf(argv[3], "%hhx:%hhx:%hhx:%hhx:%hhx:%hhx", &src_mac[0], &src_mac[1], &src_mac[2], &src_mac[3], &src_mac[4], &src_mac[5]);
-
-	vlanid = atoi(argv[4]);
-	pcp   = atoi(argv[5]);
-	txlen   = atoi(argv[6]);
-	seq_off = atoi(argv[7]);
-	pkt_limit = atoi(argv[8]);
-	duration = atoi(argv[9]);
-	ratelimit = atoi(argv[10]);
-
-	if (ratelimit && (pkt_limit < 0)) {
-		printf("Invalid args\n");
-		exit(2);
+	if (TriggerEnable) {
+		if (TPmod_Initialize(&TriggerInstance, TMode) != 0) {
+			printf("Test PMOD controller failed to initialized. Disabling all external triggers\n");
+			TriggerEnable = false;
+		}
+		/* avoid unnecessary trigger when hw mode */
+		if (TMode == ETriggerModeHW)
+			TriggerEnable = false;
 	}
 
 	void* rs = openavbRawsockOpen(interface, FALSE, TRUE, ethertype, 0, MAX_NUM_FRAMES);
@@ -299,7 +529,7 @@ int main(int argc, char* argv[])
 	static U64 packetIntervalNSec = 0;
 	static U64 nextCycleNSec = 0;
 	static U64 nextReportInterval = 0;
- 
+
 	packetIntervalNSec = NANOSECONDS_PER_SECOND / txRate;
 	clock_gettime(CLOCK_MONOTONIC, &now);
 	nextCycleNSec = TIMESPEC_TO_NSEC(now);
@@ -331,7 +561,7 @@ int main(int argc, char* argv[])
 		pData = pBuf + hdrlen;
 		datalen = txlen - hdrlen;
 
- 		/* send pkt_limit packets */
+		/* send pkt_limit packets */
 		clock_gettime(clkid, &now);
 
 		if(ratelimit)
