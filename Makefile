@@ -10,6 +10,7 @@ all:
 install:
 	$(MAKE) -C tsn_listener install
 	$(MAKE) -C tsn_talker install
+	$(MAKE) -C tsn-scripts install
 
 .PHONY: clean
 clean:
