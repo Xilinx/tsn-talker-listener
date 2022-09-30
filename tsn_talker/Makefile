@@ -18,7 +18,8 @@ INCFLAGS = -I../OpenAvnu/daemons/mrpd -I../OpenAvnu/examples/common -I../OpenAvn
 LDLIBS = -lrt -lm -pthread
 LDFLAGS += -L../OpenAvnu/lib/igb
 
-bindir ?= /usr/bin
+prefix = /usr
+bindir ?= $(prefix)/bin
 
 .PHONY: all install clean
 
