@@ -5,7 +5,9 @@
 
 INSTALL_PROGRAM ?= install
 
-bindir ?= /usr/bin
+prefix = /usr
+
+bindir ?= $(prefix)/bin
 
 SCRIPT = frer_receive.sh frer_sender.sh qci_receive.sh qci_sender.sh start_latency_test.sh tadma_auto.sh start_qbv_test.sh common.sh
 
