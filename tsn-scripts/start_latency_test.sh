@@ -60,15 +60,6 @@ else
 	SUDO=
 fi
 
-# Check to ensure TSN Overlay is loaded
-if [ "$HOSTNAME" = "kria" ]; then
-	OVERLAY=$($SUDO xmutil listapps | grep tsn-rs485pmod | cut -d ')' -f2 | tr ',' ' ' | tr -d ' ')
-	if [ "$OVERLAY" == "-1" ]; then
-		echo "Please load tsn-rs485pmod overlay using xmutil and try again"
-		return 1
-	fi
-fi
-
 # Sanity test on interfaces
 EP=${EP:-ep}
 temp_emac0=$(ip -d link show | grep 80040000 -B1)
