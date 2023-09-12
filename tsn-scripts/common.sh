@@ -47,7 +47,7 @@ set_qbv_tadma_sched(){
 	                count     = 1; // fetch 1 frame at this time
 	        }
 	);
-	EOF1
+EOF1
 	
 	cat > qbv_sched.cfg << EOF1
 	qbv =
@@ -69,7 +69,7 @@ set_qbv_tadma_sched(){
 	        );
 	    };
 	};
-	EOF1
+EOF1
 	tadma_prog -c ep tadma_sched.cfg
 	qbv_sched -c ep qbv_sched.cfg -f
-} 
+}
