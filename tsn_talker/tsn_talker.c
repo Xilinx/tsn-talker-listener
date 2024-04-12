@@ -12,6 +12,8 @@
 #include <syscall.h>
 #include <sys/ioctl.h>
 #include "../common/tpmod_ctrl.h"
+#include <linux/ethtool.h>
+#include <linux/sockios.h>
 
 static clockid_t get_clockid(int fd)
 {
@@ -119,11 +121,45 @@ void dumpFrame(U8 *pFrame, U32 len, hdr_info_t *hdr)
 
 int phc_fd;
 
-void ptp_open()
+int ptp_open()
 {
-	phc_fd = open( "/dev/ptp0", O_RDWR );
-	if(phc_fd < 0)
-		printf("ptp open failed\n");
+	struct ethtool_ts_info info;
+	struct ifreq ethtool_ifr;
+	char phc[32];
+	int ret;
+
+	/* Identify PTP index */
+	int fd = socket(PF_INET, SOCK_DGRAM, IPPROTO_IP);
+	memset(&ethtool_ifr, 0, sizeof(ethtool_ifr));
+	memset(&info, 0, sizeof(info));
+	info.cmd = ETHTOOL_GET_TS_INFO;
+	strncpy(ethtool_ifr.ifr_name, interface, IFNAMSIZ);
+	ethtool_ifr.ifr_data = (char *) &info;
+	ret = ioctl(fd, SIOCETHTOOL, &ethtool_ifr);
+	if (ret < 0) {
+		printf("ioctl SIOCETHTOOL failed: %m");
+		close(fd);
+		return -1;
+	}
+	if (info.phc_index >= 0) {
+		printf("selected /dev/ptp%d as PTP clock\n", info.phc_index);
+		snprintf(phc, sizeof(phc), "/dev/ptp%d", info.phc_index);
+	}
+	else {
+		printf("phc index: %d\n",info.phc_index);
+		close(fd);
+		return -1;
+	}
+	phc_fd = open(phc, O_RDWR);
+	if (phc_fd < 0) {
+		close(fd);
+		return -1;
+	}
+
+	close(phc_fd);
+	close(fd);
+
+	return 0;
 }
 
 #if 0
