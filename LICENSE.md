@@ -4,7 +4,8 @@ Software License Agreement
 MIT
 ---
 
-Copyright (c) Xilinx Inc
+Copyright (c) 2016 - 2022 Xilinx, Inc. All rights reserved.
+Copyright (c) 2022 - 2024 Advanced Micro Devices, Inc. All rights reserved.
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -28,7 +29,8 @@ THE SOFTWARE.
 LGPL License
 ------------
 
-Copyright (c) Xilinx Inc
+Copyright (c) 2016 - 2022 Xilinx, Inc. All rights reserved.
+Copyright (c) 2022 - 2024 Advanced Micro Devices, Inc. All rights reserved.
 
 This program is free software; you can redistribute it and/or modify it
 under the terms and conditions of the GNU Lesser General Public License,
