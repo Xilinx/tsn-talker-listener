@@ -189,7 +189,7 @@ int send_packet(void *rs, U8 *pBuf, U8 *pData, int hdrlen,
 		pData[seq_off + 2] = (seq_no >> 8) & 0xff;
 		pData[seq_off + 3] = (seq_no )& 0xff;
 
-		for (i=seq_no + 4; i<datalen; i++)
+		for (i=seq_off + 4; i<datalen; i++)
 			pData[i] = (i & 0xff);
 
 		seq_no ++;
