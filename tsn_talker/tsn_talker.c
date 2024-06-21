@@ -156,7 +156,6 @@ int ptp_open()
 		return -1;
 	}
 
-	close(phc_fd);
 	close(fd);
 
 	return 0;
@@ -573,7 +572,8 @@ int main(int argc, char* argv[])
 	#endif
 
 	clkid = get_clockid(phc_fd);
-	clock_gettime(clkid, &tmx);
+	if (clock_gettime(clkid, &tmx))
+		return -1;
 
 	tmx.tv_sec = 0;
 	tmx.tv_nsec = ( NANOSECONDS_PER_SECOND - tmx.tv_nsec);
@@ -619,6 +619,7 @@ int main(int argc, char* argv[])
 		}
 	}
 
+	close(phc_fd);
 	openavbRawsockClose(rs);
 	return 0;
 }
