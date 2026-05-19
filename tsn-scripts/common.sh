@@ -12,19 +12,6 @@ switch_present=0
 destmac=${destmac:-e0:e0:e0:e0:e0:e0}
 st_pcp=4
 
-# Read ST PCP from device-tree bootargs (xilinx_tsn_ep.st_pcp=); default st_pcp=4.
-get_st_pcp() {
-	local st_str="xilinx_tsn_ep.st_pcp"
-	local v new
-	v=$(grep -m1 "$st_str" /proc/device-tree/chosen/bootargs 2>/dev/null) || true
-	if [ -n "$v" ]; then
-		new=${v#*$st_str}
-		st_pcp=${new:1:1}
-	fi
-	ST_PCP=$st_pcp
-	echo "ST PCP:$st_pcp"
-}
-
 get_st_pcp(){
 	# Read the effective ST PCP from the driver's sysfs parameter.
 	# Module name differs by kernel: xilinx_tsn_ep (pre xilinx-v2025.1) vs
@@ -51,10 +38,15 @@ get_st_pcp(){
 	echo "ST PCP:$st_pcp (default)"
 }
 
-init_ptp(){
+# Bring up the second EMAC (tsn_emac_1) when running FRER demos.
+init_second_emac() {
 	if [ $frer -eq 1 ]; then
-		ip link set eth2 address $eth2mac
-		ip link set eth2 up
+		ifname=$(grep -lx "tsn_emac_1" /sys/class/net/*/device/of_node/name 2>/dev/null | head -1 | awk -F/ '{print $5}')
+		if [ -z "$ifname" ]; then
+			echo "Unable to find network interface for tsn_emac_1 in sysfs"
+			exit 1
+		fi
+		ip link set "$ifname" up
 	fi
 }                                                                  
 
