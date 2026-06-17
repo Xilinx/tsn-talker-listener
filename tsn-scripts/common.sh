@@ -12,11 +12,29 @@ destmac=e0:e0:e0:e0:e0:e0
 st_pcp=4
 
 get_st_pcp(){
-	st_str="xilinx_tsn_ep.st_pcp"
-	v=`grep $st_str /proc/device-tree/chosen/bootargs`
-	new=${v#*$st_str}
-	st_pcp=${new:1:1}
-	echo "ST PCP:$st_pcp"
+	# Read the effective ST PCP from the driver's sysfs parameter.
+	# Module name differs by kernel: xilinx_tsn_ep (pre xilinx-v2025.1) vs
+	# xilinx_emac_tsn (xilinx-v2025.1+). Auto-detect and fall back to the
+	# driver default (4) if neither is present.
+	local m val
+	for m in xilinx_emac_tsn xilinx_tsn_ep; do
+		if [ -f /sys/module/$m/parameters/st_pcp ]; then
+			val=$(cat /sys/module/$m/parameters/st_pcp)
+			val=${val%%,*}
+			case "$val" in
+				[0-7])
+					st_pcp=$val
+					echo "ST PCP:$st_pcp (from $m)"
+					return
+					;;
+				*)
+					echo "ST PCP: invalid sysfs value '$val', using default 4"
+					;;
+			esac
+		fi
+	done
+	st_pcp=4
+	echo "ST PCP:$st_pcp (default)"
 }
 
 init_ptp(){

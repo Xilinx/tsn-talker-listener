@@ -56,11 +56,29 @@ BE_PCP=${BE_PCP:-1}
 destmac=${destmac:-e0:e0:e0:e0:e0:e0}
 
 function get_st_pcp() {
-	st_str="xilinx_tsn_ep.st_pcp"
-	read v < /proc/device-tree/chosen/bootargs
-	new=${v#*$st_str}
-	ST_PCP=${new:1:1}
-	echo "ST PCP:$ST_PCP"
+	# Read the effective ST PCP from the driver's sysfs parameter.
+	# Module name differs by kernel: xilinx_tsn_ep (pre xilinx-v2025.1) vs
+	# xilinx_emac_tsn (xilinx-v2025.1+). Auto-detect and fall back to the
+	# driver default (4) if neither is present.
+	local m val
+	for m in xilinx_emac_tsn xilinx_tsn_ep; do
+		if [ -f /sys/module/$m/parameters/st_pcp ]; then
+			val=$(cat /sys/module/$m/parameters/st_pcp)
+			val=${val%%,*}
+			case "$val" in
+				[0-7])
+					ST_PCP=$val
+					echo "ST PCP:$ST_PCP (from $m)"
+					return
+					;;
+				*)
+					echo "ST PCP: invalid sysfs value '$val', using default 4"
+					;;
+			esac
+		fi
+	done
+	ST_PCP=4
+	echo "ST PCP:$ST_PCP (default)"
 }
 
 ## get MAC address
