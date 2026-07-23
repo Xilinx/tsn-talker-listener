@@ -99,7 +99,7 @@ if [ $switch_present != 0 ]; then
 			fi
 		done
 	elif [ $operation == "rx" ]; then
-		if [ "$HOSTNAME" = "kria" ]; then
+		if [ "$HOSTNAME" = "amd-edf" ] || [ "$HOSTNAME" = "kria" ]; then
 			${SUDO} tsn_listener -T hw & 
 			sleep 1 
 			${SUDO} killall tsn_listener
@@ -149,7 +149,7 @@ BE_VLAN=20
 #Note: TSN_Talker params such as "srcmac, destmac, offset, duration, eth-type, interface, ratelimit" are using default, 
 #		user can override defaults by passing arguments. Use 'tsn_talker --help' for more information.
 # run atleast one talker in hw mode (-T hw) to send control signal over test pmod for oscilloscope visualisation.
-if [ "$HOSTNAME" = "kria" ]; then
+if [ "$HOSTNAME" = "amd-edf" ] || [ "$HOSTNAME" = "kria" ]; then
 	$SUDO tsn_talker -n $PKT -l $ST_LEN -v $ST_VLAN -p $ST_PCP -T hw &
 	$SUDO tsn_talker -n $PKT -l $BE_LEN -v $BE_VLAN -p $BE_PCP  &
 else 
