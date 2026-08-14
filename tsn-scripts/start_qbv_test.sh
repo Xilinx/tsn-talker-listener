@@ -8,6 +8,15 @@
 # Schedule and Start PCP traffic
 #
 
+source /usr/bin/common.sh
+
+script_exit() {
+	if [[ "${BASH_SOURCE[0]}" != "$0" ]]; then
+		return "$1"
+	fi
+	exit "$1"
+}
+
 # Usage and help function
 function print_help() {
 	echo -e "Usage:"
@@ -20,14 +29,14 @@ function print_help() {
 
 if [ "$#" == 0 ]; then
 	print_help
-	return
+	script_exit 0
 fi
 
 while [ "$1" != "" ]; do
 	case $1 in
 	-h | --help )
 		print_help $0
-		return 0
+		script_exit 0
 		;;
 	-rx )
 		operation=rx
@@ -37,7 +46,7 @@ while [ "$1" != "" ]; do
 		;;
 	*)
 		echo "invalid argument '$1'"
-		return 1
+		script_exit 1
 		;;
 	esac
 	shift
@@ -52,131 +61,160 @@ else
 	SUDO=
 fi
 
-BE_PCP=${BE_PCP:-1}
-destmac=${destmac:-e0:e0:e0:e0:e0:e0}
+ETYPE=${ETYPE:-0xb62c}
 
-function get_st_pcp() {
-	# Read the effective ST PCP from the driver's sysfs parameter.
-	# Module name differs by kernel: xilinx_tsn_ep (pre xilinx-v2025.1) vs
-	# xilinx_emac_tsn (xilinx-v2025.1+). Auto-detect and fall back to the
-	# driver default (4) if neither is present.
-	local m val
-	for m in xilinx_emac_tsn xilinx_tsn_ep; do
-		if [ -f /sys/module/$m/parameters/st_pcp ]; then
-			val=$(cat /sys/module/$m/parameters/st_pcp)
-			val=${val%%,*}
-			case "$val" in
-				[0-7])
-					ST_PCP=$val
-					echo "ST PCP:$ST_PCP (from $m)"
-					return
-					;;
-				*)
-					echo "ST PCP: invalid sysfs value '$val', using default 4"
-					;;
-			esac
-		fi
-	done
-	ST_PCP=4
-	echo "ST PCP:$ST_PCP (default)"
-}
+# Enable TX timestamping in hardware before starting talkers.
+# Prefer devmem when available; otherwise use devmem2 fallback.
+if command -v devmem >/dev/null 2>&1; then
+	${SUDO} devmem 0x80040438 32 0x1002A >/dev/null
+elif command -v devmem2 >/dev/null 2>&1; then
+	${SUDO} devmem2 0x80040438 w 0x1002A >/dev/null
+else
+	echo "Neither devmem nor devmem2 is available"
+	script_exit 1
+fi
+
+if [ $? -ne 0 ]; then
+	echo "Failed to enable TX timestamping"
+	script_exit 1
+fi
+
+detect_queue_design || script_exit 1
 
 ## get MAC address
 read srcmac < /sys/class/net/ep/address
 
-## Verify Switch in design
-dt_dir=/proc/device-tree/
-switch_dir=`find $dt_dir -iname tsn_switch*`
+detect_switch_presence
 
-if [ "$switch_dir" == "" ]; then
-	echo "switch not found in the design"
-	switch_present=0
-else
-	switch_present=1
+if [[ "$num_queues" == "4q" || "$num_queues" == "8q" ]]; then
+	detect_st_queues || script_exit 1
+fi
+
+if [ -z "$operation" ]; then
+	echo "please specify mode of operation 'tx' or 'rx'"
+	print_help
+	script_exit 1
 fi
 
 # Verify if PTP is established
 pids=`pidof ptp4l`
 if [ "$pids" == "" ]; then
 	echo "start PTP before scheduling traffic, invalid operation"
-	return 1
+	script_exit 1
 fi
 
 
 # Adding Switch cam entries
-if [ $switch_present != 0 ]; then
-	if [ $operation == "tx" ]; then
-		for i in 10 20
-		do
-		 	$SUDO switch_cam -d $destmac $i
-			$SUDO switch_cam -a $destmac $i swp1
-			tmp=`$SUDO switch_cam -r $destmac $i | grep "swp1"`
-			if [ "$tmp" == "" ]; then
-				echo "Switch cam not set in properly for $destmac and vlan $i"
-				return 1
-			fi
-		done
+if [ "$switch_present" != "0" ]; then
+	if [ "$operation" == "tx" ]; then
+		configure_switch_cam_multi_vlan "$destmac" swp1 10 20 || script_exit 1
 	elif [ $operation == "rx" ]; then
 		if [ "$HOSTNAME" = "amd-edf" ] || [ "$HOSTNAME" = "kria" ]; then
 			${SUDO} tsn_listener -T hw & 
 			sleep 1 
 			${SUDO} killall tsn_listener
 		fi
-		for i in 10 20
-		do
-			$SUDO switch_cam -d $destmac $i
-			$SUDO switch_cam -a $destmac $i swp0
-			tmp=`$SUDO switch_cam -r $destmac $i | grep "swp0"`
-			if [ "$tmp" == "" ]; then
-				echo "Switch cam not set in properly for $destmac and vlan $i"
-				return 1
-			fi
-		done
-		return 0
+		configure_switch_cam_multi_vlan "$destmac" swp0 10 20 || script_exit 1
+		echo "Switch CAM entries configured for listener. Done."
+		script_exit 0
 	else
 		echo " please specify mode of operation 'tx' or 'rx'"
-		return 1
+		script_exit 1
 	fi
 fi
 
-# Start qbv
-$SUDO qbv_sched ep off -f
-$SUDO qbv_sched -c ep /etc/xilinx-tsn/qbv.cfg -f
-sleep 1
-temp=`$SUDO qbv_sched -g ep | grep "Gate State: 4"`
-if [ "$temp" == "" ]; then
+if [ "$operation" == "rx" ]; then
+	echo "Running listener mode..."
+	if [ "$HOSTNAME" = "kria" ]; then
+		${SUDO} tsn_listener -T hw
+	else
+		configure_switch_cam_multi_vlan "$destmac" swp1 10 20 || script_exit 1
+	fi
+	script_exit 0
+fi
+
+BASE_TIME=$(get_ptp_base_time_simple)
+if [ -z "$BASE_TIME" ]; then
+	echo "Unable to calculate base-time from PTP clock"
+	script_exit 1
+fi
+
+configure_taprio_qbv "$num_queues"
+if [ $? -ne 0 ]; then
 	echo "Qbv not scheduled properly"
-	return 1
+	script_exit 1
 fi
 
 
 # Start tsn talkers
 ${SUDO} killall tsn_talker
-get_st_pcp
-echo "Two instances of talker configured, one to generate Scheduled traffic with Vlan 10"
-echo "packet length 900 at full rate continuously and another to generate BE traffic with Vlan ID 20,"
-echo "packet length 800 at full rate continuously."
-echo ""
-
-ST_LEN=900
+BE_PCP=0
 BE_LEN=800
-PKT=-1
+ST_LEN=64
 ST_VLAN=10
 BE_VLAN=20
-
-#Note: TSN_Talker params such as "srcmac, destmac, offset, duration, eth-type, interface, ratelimit" are using default, 
-#		user can override defaults by passing arguments. Use 'tsn_talker --help' for more information.
-# run atleast one talker in hw mode (-T hw) to send control signal over test pmod for oscilloscope visualisation.
-if [ "$HOSTNAME" = "amd-edf" ] || [ "$HOSTNAME" = "kria" ]; then
-	$SUDO tsn_talker -n $PKT -l $ST_LEN -v $ST_VLAN -p $ST_PCP -T hw &
-	$SUDO tsn_talker -n $PKT -l $BE_LEN -v $BE_VLAN -p $BE_PCP  &
-else 
-	$SUDO tsn_talker -n $PKT -l $ST_LEN -v $ST_VLAN -p $ST_PCP  &
-	$SUDO tsn_talker -n $PKT -l $BE_LEN -v $BE_VLAN -p $BE_PCP  &
-fi 
+ 
+case $num_queues in
+	2q)
+		get_st_pcp
+		ST_PCP=$st_pcp
+		echo "2q design: starting ST (PCP=$ST_PCP) and BE talkers"
+		if [ "$HOSTNAME" = "amd-edf" ] || [ "$HOSTNAME" = "kria" ]; then
+			$SUDO tsn_talker --count=-1 -l $ST_LEN -v $ST_VLAN -p $ST_PCP --dmac=$destmac --etype=$ETYPE -T hw &
+		else
+			$SUDO tsn_talker --count=-1 -l $ST_LEN -v $ST_VLAN -p $ST_PCP --dmac=$destmac --etype=$ETYPE &
+		fi
+		$SUDO tsn_talker --count=-1 -l $BE_LEN -v $BE_VLAN -p $BE_PCP --dmac=$destmac --etype=$ETYPE &
+		;;
+	3q)
+		get_st_pcp
+		ST_PCP=$st_pcp
+		echo "3q design: starting ST (PCP=$ST_PCP) and BE talkers"
+		if [ "$HOSTNAME" = "amd-edf" ] || [ "$HOSTNAME" = "kria" ]; then
+			$SUDO tsn_talker --count=-1 -l $ST_LEN -v $ST_VLAN -p $ST_PCP --dmac=$destmac --etype=$ETYPE -T hw &
+		else
+			$SUDO tsn_talker --count=-1 -l $ST_LEN -v $ST_VLAN -p $ST_PCP --dmac=$destmac --etype=$ETYPE &
+		fi
+		$SUDO tsn_talker --count=-1 -l $BE_LEN -v $BE_VLAN -p $BE_PCP --dmac=$destmac --etype=$ETYPE &
+		;;
+	4q)
+		if [ ${#ST_QUEUES[@]} -ne 2 ]; then
+			echo "4q design expects 2 ST queues in device tree, found ${#ST_QUEUES[@]}"
+			script_exit 1
+		fi
+		ST_PCP1=${ST_QUEUES[0]}
+		ST_PCP2=${ST_QUEUES[1]}
+		echo "4q design: starting ST (PCP=$ST_PCP1, PCP=$ST_PCP2) and BE talkers"
+		if [ "$HOSTNAME" = "amd-edf" ] || [ "$HOSTNAME" = "kria" ]; then
+			$SUDO tsn_talker --count=-1 -l $ST_LEN -v $ST_VLAN -p $ST_PCP2 --dmac=$destmac --etype=$ETYPE -T hw &
+		else
+			$SUDO tsn_talker --count=-1 -l $ST_LEN -v $ST_VLAN -p $ST_PCP2 --dmac=$destmac --etype=$ETYPE &
+		fi
+		$SUDO tsn_talker --count=-1 -l $BE_LEN -v $BE_VLAN -p $BE_PCP --dmac=$destmac --etype=$ETYPE &
+		;;
+	8q)
+		if [ ${#ST_QUEUES[@]} -ne 2 ]; then
+			echo "8q design expects 2 ST queues in device tree, found ${#ST_QUEUES[@]}"
+			script_exit 1
+		fi
+		ST_PCP1=${ST_QUEUES[0]}
+		ST_PCP2=${ST_QUEUES[1]}
+		echo "8q design: starting ST (PCP=$ST_PCP1, PCP=$ST_PCP2) and BE talkers"
+		if [ "$HOSTNAME" = "amd-edf" ] || [ "$HOSTNAME" = "kria" ]; then
+			$SUDO tsn_talker --count=-1 -l $ST_LEN -v $ST_VLAN -p $ST_PCP2 --dmac=$destmac --etype=$ETYPE -T hw &
+		else
+			$SUDO tsn_talker --count=-1 -l $ST_LEN -v $ST_VLAN -p $ST_PCP2 --dmac=$destmac --etype=$ETYPE &
+		fi
+		$SUDO tsn_talker --count=-1 -l $BE_LEN -v $BE_VLAN -p $BE_PCP --dmac=$destmac --etype=$ETYPE &
+		;;
+	*)
+		echo "Unsupported queue design '$num_queues'"
+		script_exit 1
+		;;
+esac
 
 echo ""
 sleep 1
-echo "***** Running Talker for 30 seconds ******"
-sleep 30
+echo "***** Running Talker for 10 seconds ******"
+sleep 10
 ${SUDO} killall tsn_talker

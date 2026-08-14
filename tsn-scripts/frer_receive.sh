@@ -6,7 +6,7 @@
 #*****************************************************************************
 #
 source /usr/bin/common.sh
-
+detect_switch_presence
 if [ $switch_present == 0 ]; then
 	echo "FRER is not supported for ep only design"
 	exit
@@ -15,7 +15,7 @@ fi
 frer=1
 send=0
 mac="e0:e0:e0:e0:e0:e0"
-init_ptp
+init_second_emac
 switch_cam -d $mac 10
 switch_cam -d $mac 20
 switch_cam -a $mac 10 swp0 7
@@ -48,4 +48,8 @@ echo "    0            8        7       0            0            1         1"
 cb_prog -a swp1 0 32 noport 0 0 7 7 0 0 1 1 
 cb_prog -a swp2 0 32 noport 0 0 8 7 0 0 1 1
 #tcpdump -i ep -e -s0 -w frer_cap.pcapng 
-tcpdump -i ep -e 
+tcpdump -i ep -e &
+TCPDUMP_PID=$!
+sleep 30 
+kill "$TCPDUMP_PID" 2>/dev/null
+wait "$TCPDUMP_PID" 2>/dev/null
